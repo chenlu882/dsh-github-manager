@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# logs and runtime
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# builds and coverage
+dist/
+coverage/
+.test-output/
+*.tsbuildinfo
+
+# local secrets
+.env
+.env.*
+!.env.example
