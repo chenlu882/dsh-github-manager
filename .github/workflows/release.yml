@@ -1,0 +1,43 @@
+name: release
+on:
+  release:
+    types: [published]
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm run check
+      - run: npm test
+      - name: Create clean package and attach assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_ID: ${{ github.event.release.id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:RELEASE_TAG -ne "v$version") { throw 'Release tag must match package version' }
+          $stage = Join-Path $env:RUNNER_TEMP 'dsh-release'
+          $root = Join-Path $stage 'dsh-github-manager'
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          $files = @('.github','.editorconfig','.gitignore','locale','test','docs','package.json','cordis.patch.yml','index.js','client.js','scan-worker.js','version.js','icon.svg','README.md','LICENSE','CHANGELOG.md','CONTRIBUTING.md','SECURITY.md')
+          foreach ($name in $files) { Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $name) -Destination $root -Recurse -Force }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $name = "dsh-github-manager-$version.zip"
+          $zip = Join-Path $env:RUNNER_TEMP $name
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($stage,$zip)
+          $checksum = "$zip.sha256.txt"
+          "$((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash)  $name" | Set-Content -LiteralPath $checksum -Encoding utf8
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          foreach ($file in @($zip,$checksum)) {
+            $assetName = [System.IO.Path]::GetFileName($file)
+            $uri = "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=$([Uri]::EscapeDataString($assetName))"
+            Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/octet-stream' -InFile $file | Select-Object name,size
+          }
